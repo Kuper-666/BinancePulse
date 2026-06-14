@@ -1,4 +1,4 @@
-﻿namespace BinanceBotV2.Configuration
+﻿namespace BinancePulse.Configuration
 {
     public class TradingOptions
     {
@@ -12,5 +12,10 @@
         public decimal TakeProfitPercent { get; set; } = 0.04m;
         public decimal TrailingStopPercent { get; set; } = 0.02m;
         public int MaxConcurrentPositions { get; set; } = 3;
+
+        // 👇 Добавленные свойства (минимальная и максимальная сумма сделки в USDC)
+        public decimal MinTradeAmount { get; set; } = 10m;
+        public decimal MaxTradeAmount { get; set; } = 50m;
+        public decimal RiskPerTradePercent { get; set; } = 0.02m; // 2% риска на сделку
     }
 }

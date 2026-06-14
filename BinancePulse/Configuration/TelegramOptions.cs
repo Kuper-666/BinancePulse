@@ -1,4 +1,4 @@
-﻿namespace BinanceBotV2.Configuration
+﻿namespace BinancePulse.Configuration
 {
     public class TelegramOptions
     {
