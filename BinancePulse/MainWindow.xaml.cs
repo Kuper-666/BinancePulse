@@ -27,5 +27,10 @@ namespace BinancePulse
         {
             _vm?.Stop ();
         }
+
+        private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_vm != null) await _vm.CheckForUpdates ();
+        }
     }
 }

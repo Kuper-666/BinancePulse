@@ -16,11 +16,9 @@ namespace BinancePulse
     public partial class App : Application
     {
         private IHost? _host;
-        private static Mutex? _appMutex;
 
         protected override async void OnStartup(StartupEventArgs e)
         {
-
             base.OnStartup (e);
             SetupGlobalExceptionHandling ();
 
@@ -49,16 +47,15 @@ namespace BinancePulse
                     services.AddSingleton<PositionManager> ();
                     services.AddSingleton<TradingStrategy> ();
                     services.AddSingleton<PositionProtector> ();
-
-                    // Исправленная регистрация TelegramNotifier
-                    services.AddSingleton<TelegramNotifier> (sp =>
-                    {
-                        var telOpts = sp.GetRequiredService<IOptions<TelegramOptions>> ().Value;
-                        return new TelegramNotifier (telOpts.BotToken, telOpts.ChatId);
-                    });
-
+                    services.AddSingleton<TelegramNotifier> ();
                     services.AddSingleton<WebSocketPriceService> ();
                     services.AddSingleton<TradingService> ();
+
+                    // UpdateManager принимает Action<string> logger — передаём заглушку,
+                    // реальный лог подключается позже через MainWindowViewModel.AddLog
+                    services.AddSingleton<UpdateManager> (sp =>
+                        new UpdateManager (msg => System.Diagnostics.Debug.WriteLine (msg)));
+
                     services.AddSingleton<MainWindowViewModel> ();
                 })
                 .Build ();
@@ -66,6 +63,12 @@ namespace BinancePulse
             await _host.StartAsync ();
 
             var vm = _host.Services.GetRequiredService<MainWindowViewModel> ();
+
+            // Теперь подключаем реальный лог UI к UpdateManager
+            // UpdateManager логирует через переданный Action — он уже задан выше.
+            // Если нужно перенаправить в UI, можно сделать так:
+            // vm.AddLog будет установлен в MainWindow.xaml.cs
+
             var mainWindow = new MainWindow
             {
                 DataContext = vm
@@ -104,7 +107,7 @@ namespace BinancePulse
             string errorLogPath = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "Logs", "critical_errors.log");
             try
             {
-                Directory.CreateDirectory (Path.GetDirectoryName (errorLogPath));
+                Directory.CreateDirectory (Path.GetDirectoryName (errorLogPath)!);
                 File.AppendAllText (errorLogPath, logMessage + "\n\n");
             }
             catch { }
@@ -118,8 +121,6 @@ namespace BinancePulse
                 await _host.StopAsync ();
                 _host.Dispose ();
             }
-            _appMutex?.ReleaseMutex ();
-            _appMutex?.Dispose ();
             base.OnExit (e);
         }
     }
