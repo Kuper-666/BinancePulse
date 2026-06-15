@@ -3,17 +3,14 @@ name: .NET Desktop Build and Release
 on:
   push:
     tags:
-      - 'v*' # Триггер: создание тега (v1.0.0, v2.3.5, ...)
-  workflow_dispatch: # Триггер: ручной запуск из интерфейса GitHub
-
-env:
-  PROJECT_PATH: 'BinancePulse.csproj' # Путь к вашему файлу проекта (.csproj)
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-and-release:
     runs-on: windows-latest
     permissions:
-      contents: write # Права на запись для создания релиза
+      contents: write
 
     steps:
     - name: Checkout code
@@ -21,24 +18,38 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Find .csproj file
+      id: find
+      shell: pwsh
+      run: |
+        $proj = Get-ChildItem -Recurse -Filter *.csproj | Select-Object -First 1
+        if ($proj) {
+          Write-Host "Found project: $($proj.FullName)"
+          echo "PROJECT_PATH=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "PROJECT_DIR=$($proj.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+        } else {
+          Write-Error "No .csproj file found"
+          exit 1
+        }
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x' # Версия .NET
+        dotnet-version: '8.0.x'
 
     - name: Restore dependencies
-      run: dotnet restore ${{ env.PROJECT_PATH }}
+      run: dotnet restore "${{ env.PROJECT_PATH }}"
 
-    - name: Build the application
-      run: dotnet build ${{ env.PROJECT_PATH }} -c Release --no-restore
+    - name: Build
+      run: dotnet build "${{ env.PROJECT_PATH }}" -c Release --no-restore
 
     - name: Publish as single file
-      run: dotnet publish ${{ env.PROJECT_PATH }} -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+      run: dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
 
     - name: Create archive
       run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_v${{ github.ref_name }}.zip
 
-    - name: Create GitHub Release and upload asset
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
