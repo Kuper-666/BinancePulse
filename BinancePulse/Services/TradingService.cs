@@ -30,6 +30,9 @@ namespace BinancePulse.Services
         public event Action<TradeLog> OnTradeClosed;
         public event Action<string, decimal, TradeAction> OnMarketUpdate;
 
+        private decimal _dailyPnL = 0;
+        private DateTime _lastResetDate = DateTime.UtcNow.Date;
+
         public TradingService(
             BinanceClient client,
             WalletManager wallet,
@@ -186,31 +189,42 @@ namespace BinancePulse.Services
             decimal fastSma = indicators.ContainsKey ("fastSma") ? indicators["fastSma"] : 0;
             decimal slowSma = indicators.ContainsKey ("slowSma") ? indicators["slowSma"] : 0;
 
+            // Дневной лимит убытка
+            if (IsDailyLossLimitExceeded ())
+            {
+                Log ($"⛔ Дневной лимит убытка ({_tradingOptions.MaxDailyLoss} USDC) превышен. Сделка отменена.");
+                return;
+            }
+
             if (!( rsi < _tradingOptions.RsiBuyThreshold && fastSma > slowSma )) return;
 
-            decimal qty = ( currentBalance * _tradingOptions.RiskPerTradePercent ) / price;
-            decimal maxQty = _tradingOptions.MaxTradeAmount / price;
-            qty = Math.Min (qty, maxQty);
-            decimal stepSize = await _client.GetStepSizeAsync (symbol);
-            qty = Math.Floor (qty / stepSize) * stepSize;
+            // Динамический размер позиции на основе ATR
+            decimal qty = await CalculateDynamicQuantity (symbol, currentBalance, price);
             if (qty <= 0 || qty * price > currentBalance) return;
 
             if (_lastBuyTime.TryGetValue (symbol, out var lastTime) && DateTime.UtcNow - lastTime < TimeSpan.FromMinutes (2))
                 return;
             _lastBuyTime[symbol] = DateTime.UtcNow;
 
-            Log ($"💵 Покупка {qty} {symbol} по {price:F4}");
+            Log ($"💵 Покупка {qty} {symbol} по {price:F4} (сумма ~{qty * price:F2} USDC)");
             var order = await _client.PlaceOrder (symbol, "BUY", "MARKET", qty);
             if (order != null)
             {
+                // Адаптивные уровни стоп-лосс и тейк-профит на основе ATR
+                var atr = await _client.GetATRAsync (symbol, _tradingOptions.ATRPeriod);
+                if (atr <= 0) atr = price * 0.01m;
+                decimal stopPrice = price - atr * _tradingOptions.ATRMultiplierForStopLoss;
+                stopPrice = Math.Max (stopPrice, price * 0.9m);
+                decimal takePrice = price + atr * 2.5m; // множитель можно вынести в настройки
+
                 var pos = new OpenPosition
                 {
                     Symbol = symbol,
                     Quantity = qty,
                     EntryPrice = price,
                     OpenTime = DateTime.UtcNow,
-                    StopLossPrice = price * ( 1 - _tradingOptions.StopLossPercent ),
-                    TakeProfitPrice = price * ( 1 + _tradingOptions.TakeProfitPercent ),
+                    StopLossPrice = stopPrice,
+                    TakeProfitPrice = takePrice,
                     HighestPrice = price,
                     HighestPriceSinceOpen = price,
                     OcoOrderListId = 0
@@ -291,6 +305,43 @@ namespace BinancePulse.Services
                 await File.WriteAllTextAsync (filePath, System.Text.Json.JsonSerializer.Serialize (trades, options));
             }
             catch (Exception ex) { Log ($"Ошибка сохранения истории: {ex.Message}"); }
+        }
+
+        private async Task<decimal> CalculateDynamicQuantity(string symbol, decimal currentBalance, decimal currentPrice)
+        {
+            var atr = await _client.GetATRAsync (symbol, _tradingOptions.ATRPeriod);
+            if (atr <= 0.0001m) atr = currentPrice * 0.01m; // fallback
+
+            // Размер позиции в USDC = (баланс × риск%) × (базовая волатильность / текущая ATR)
+            // Базовая волатильность = 1% от цены (условно)
+            decimal baseVolatility = currentPrice * 0.01m;
+            decimal volatilityFactor = baseVolatility / atr;
+            volatilityFactor = Math.Clamp (volatilityFactor, 0.5m, 2.0m);
+
+            decimal riskUsdc = currentBalance * _tradingOptions.RiskPerTradePercent;
+            decimal positionUsdc = riskUsdc * volatilityFactor;
+            positionUsdc = Math.Clamp (positionUsdc, _tradingOptions.MinTradeAmount, _tradingOptions.MaxTradeAmount);
+
+            decimal qty = positionUsdc / currentPrice;
+            decimal stepSize = await _client.GetStepSizeAsync (symbol);
+            qty = Math.Floor (qty / stepSize) * stepSize;
+            return qty;
+        }
+
+        private void UpdateDailyPnL(decimal pnl)
+        {
+            if (DateTime.UtcNow.Date != _lastResetDate)
+            {
+                _dailyPnL = 0;
+                _lastResetDate = DateTime.UtcNow.Date;
+                Log ("🔄 Дневной счётчик PnL сброшен");
+            }
+            _dailyPnL += pnl;
+        }
+
+        private bool IsDailyLossLimitExceeded()
+        {
+            return _dailyPnL <= _tradingOptions.MaxDailyLoss;
         }
 
         private void Log(string msg) => OnLogGenerated?.Invoke (msg);

@@ -17,5 +17,10 @@
         public decimal MinTradeAmount { get; set; } = 10m;
         public decimal MaxTradeAmount { get; set; } = 50m;
         public decimal RiskPerTradePercent { get; set; } = 0.02m; // 2% риска на сделку
+
+        public decimal ATRMultiplierForStopLoss { get; set; } = 1.5m;   // стоп-лосс = ATR × множитель
+        public decimal ATRMultiplierForPosition { get; set; } = 0.02m;  // размер позиции = (баланс × риск) / (ATR × множитель)
+        public int ATRPeriod { get; set; } = 14;                        // период ATR (свечи)
+        public decimal MaxDailyLoss { get; set; } = -20m;               // дневной лимит убытка в USDC
     }
 }
