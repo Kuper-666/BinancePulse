@@ -1,16 +1,15 @@
 <Window x:Class="BinancePulse.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="BinancePulse" Height="500" Width="850"
+        Title="BinancePulse" Height="600" Width="900"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Верхняя панель с кнопками и версией -->
+        <!-- Верхняя панель -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
             <Button Content="▶ Старт" Width="80" Height="30" Click="StartButton_Click" Margin="0,0,5,0"/>
             <Button Content="⏹ Стоп" Width="80" Height="30" Click="StopButton_Click" Margin="0,0,5,0"/>
@@ -24,9 +23,43 @@
             <TextBlock Text="{Binding UpdateStatus}" Margin="10,5,0,0" Foreground="#f39c12" VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- Нижняя часть: лог -->
-        <TextBox Grid.Row="2" x:Name="LogTextBox" IsReadOnly="True" TextWrapping="Wrap" 
-                 VerticalScrollBarVisibility="Auto" Margin="0,5,0,0"
-                 FontFamily="Consolas" FontSize="11" Background="#1e1e1e" Foreground="#dcdcdc"/>
+        <TabControl Grid.Row="1">
+            <TabItem Header="📈 Торговля">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="150"/>
+                    </Grid.RowDefinitions>
+                    <DataGrid Grid.Row="0" ItemsSource="{Binding PairsList}" AutoGenerateColumns="False"
+                              CanUserAddRows="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Пара" Binding="{Binding Pair}" Width="100"/>
+                            <DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="120"/>
+                            <DataGridTextColumn Header="Сигнал" Binding="{Binding Analysis}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBox Grid.Row="1" x:Name="LogTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Margin="0,5,0,0"
+                             FontFamily="Consolas" FontSize="11" Background="#1e1e1e" Foreground="#dcdcdc"/>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="📊 История сделок">
+                <DataGrid ItemsSource="{Binding TradesHistory}" AutoGenerateColumns="False"
+                          CanUserAddRows="False" HeadersVisibility="Column">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Дата" Binding="{Binding CloseTime, StringFormat=dd.MM HH:mm}" Width="100"/>
+                        <DataGridTextColumn Header="Пара" Binding="{Binding Symbol}" Width="80"/>
+                        <DataGridTextColumn Header="Цена входа" Binding="{Binding EntryPrice, StringFormat=F4}" Width="100"/>
+                        <DataGridTextColumn Header="Цена выхода" Binding="{Binding ExitPrice, StringFormat=F4}" Width="100"/>
+                        <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, StringFormat=F6}" Width="100"/>
+                        <DataGridTextColumn Header="PnL USDC" Binding="{Binding PnL, StringFormat=F2}" Width="100"/>
+                        <DataGridTextColumn Header="PnL %" Binding="{Binding PnLPercent, StringFormat=F2}" Width="80"/>
+                        <DataGridTextColumn Header="Длит." Binding="{Binding Duration, StringFormat=hh\:mm\:ss}" Width="80"/>
+                        <DataGridTextColumn Header="Причина" Binding="{Binding Reason}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </Window>

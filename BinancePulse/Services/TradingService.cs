@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using BinancePulse.Configuration;
 using BinancePulse.Models;
 using Microsoft.Extensions.Options;
-using BinancePulse.Configuration;
 
 namespace BinancePulse.Services
 {
@@ -26,6 +27,8 @@ namespace BinancePulse.Services
         private readonly Dictionary<string, DateTime> _lastBuyTime = new ();
 
         public event Action<string> OnLogGenerated;
+        public event Action<TradeLog> OnTradeClosed;
+        public event Action<string, decimal, TradeAction> OnMarketUpdate;
 
         public TradingService(
             BinanceClient client,
@@ -73,7 +76,6 @@ namespace BinancePulse.Services
 
         private async Task RunMainLoopAsync()
         {
-            // Инициализация: синхронизация времени, загрузка пар, подписка WebSocket
             await _client.SyncTimeAsync ();
             await UpdatePairsAsync ();
             await LoadPositionsAsync ();
@@ -82,34 +84,26 @@ namespace BinancePulse.Services
             {
                 try
                 {
-                    // 1. Проверка и закрытие позиций по защитам
+                    decimal spotBalance = await _client.GetAccountBalanceAsync ("USDC");
+                    Log ($"💰 Баланс USDC: {spotBalance:F2}");
+
                     var toClose = await _protector.CheckAndProtectAsync (GetCurrentPrice);
                     foreach (var sym in toClose)
                         await ExecuteSellAsync (sym);
 
-                    // 2. Получаем баланс USDC
-                    decimal spotBalance = await _client.GetAccountBalanceAsync ("USDC");
-                    Log ($"💰 Баланс USDC: {spotBalance:F2}");
                     if (spotBalance < _tradingOptions.MinUsdcBalance)
                     {
-                        Log ($"⚠️ Баланс USDC ({spotBalance:F2}) ниже минимального {_tradingOptions.MinUsdcBalance}, ждём...");
                         await Task.Delay (60000);
                         continue;
                     }
 
-                    // 3. Обновляем список активных пар (раз в 5 минут)
                     if (DateTime.UtcNow.Minute % 5 == 0 && DateTime.UtcNow.Second < 10)
                         await UpdatePairsAsync ();
 
                     List<string> pairs;
                     lock (_pairsLock) { pairs = new List<string> (_activePairs); }
-                    if (pairs.Count == 0)
-                    {
-                        await Task.Delay (5000);
-                        continue;
-                    }
+                    if (pairs.Count == 0) { await Task.Delay (5000); continue; }
 
-                    // 4. Анализ каждой пары
                     foreach (var symbol in pairs)
                     {
                         if (!_isRunning) break;
@@ -120,19 +114,17 @@ namespace BinancePulse.Services
                         var analysis = await _strategy.AnalyzeAsync (symbol, klines);
                         bool hasPosition = _positionManager.TryGet (symbol, out _);
 
-                        // Обновление UI (если нужно – через событие, но для простоты пока логируем)
                         if (analysis.Indicators.ContainsKey ("price"))
                         {
-                            Log ($"[{symbol}] Цена: {analysis.Indicators["price"]:F4}, Сигнал: {analysis.Action}");
+                            decimal price = analysis.Indicators["price"];
+                            OnMarketUpdate?.Invoke (symbol, price, analysis.Action);
                         }
 
-                        // Покупка
                         if (analysis.Action == TradeAction.Buy && !hasPosition && _positionManager.Count < _tradingOptions.MaxConcurrentPositions)
                         {
                             await ExecuteBuyAsync (symbol, analysis.Indicators, spotBalance);
                             spotBalance = await _client.GetAccountBalanceAsync ("USDC");
                         }
-                        // Продажа
                         else if (analysis.Action == TradeAction.Sell && hasPosition)
                         {
                             await ExecuteSellAsync (symbol);
@@ -140,7 +132,7 @@ namespace BinancePulse.Services
                         }
                     }
 
-                    await Task.Delay (60000); // Пауза 1 минута между циклами
+                    await Task.Delay (60000);
                 }
                 catch (Exception ex)
                 {
@@ -156,7 +148,6 @@ namespace BinancePulse.Services
             {
                 var newPairs = await _client.GetTopVolumePairsAsync ("USDC", 10);
                 newPairs = newPairs.Where (p => !p.Contains ("USD1") && !p.Contains ("UUSDC")).ToList ();
-
                 if (newPairs.Count > 0)
                 {
                     lock (_pairsLock) { _activePairs = newPairs; }
@@ -171,9 +162,18 @@ namespace BinancePulse.Services
 
         private async Task LoadPositionsAsync()
         {
-            // Здесь нужно восстановить позиции из файла, обновить SL/TP по текущей цене
-            // Пока заглушка – в старом коде был метод PositionManager.LoadAsync, можно добавить позже
-            Log ("📂 Загрузка сохранённых позиций (пока заглушка)");
+            try
+            {
+                await _positionManager.LoadAndUpdateAsync (
+                    getPrice: async symbol => ( await _client.GetKlinesAsync (symbol, "5m", 1) ).LastOrDefault ()?.Close ?? 0,
+                    getStopLossPercent: price => _tradingOptions.StopLossPercent,
+                    getTakeProfitPercent: price => _tradingOptions.TakeProfitPercent
+                );
+                Log ($"📂 Загружено {_positionManager.Count} открытых позиций");
+                foreach (var sym in _positionManager.GetSymbols ())
+                    Log ($"   - {sym}");
+            }
+            catch (Exception ex) { Log ($"❌ Ошибка загрузки позиций: {ex.Message}"); }
         }
 
         private decimal GetCurrentPrice(string symbol) => _webSocket.GetCurrentPrice (symbol);
@@ -186,28 +186,20 @@ namespace BinancePulse.Services
             decimal fastSma = indicators.ContainsKey ("fastSma") ? indicators["fastSma"] : 0;
             decimal slowSma = indicators.ContainsKey ("slowSma") ? indicators["slowSma"] : 0;
 
-            // Дополнительная проверка (можно расширить)
-            bool shouldBuy = rsi < _tradingOptions.RsiBuyThreshold && fastSma > slowSma;
-            if (!shouldBuy) return;
+            if (!( rsi < _tradingOptions.RsiBuyThreshold && fastSma > slowSma )) return;
 
-            // Размер позиции: фиксированная сумма 10 USDC (позже можно сделать динамическим)
-            // Динамический расчёт размера позиции
             decimal qty = ( currentBalance * _tradingOptions.RiskPerTradePercent ) / price;
-            // Ограничение максимальной суммой сделки
             decimal maxQty = _tradingOptions.MaxTradeAmount / price;
             qty = Math.Min (qty, maxQty);
-            // Округление по шагу лота биржи
             decimal stepSize = await _client.GetStepSizeAsync (symbol);
             qty = Math.Floor (qty / stepSize) * stepSize;
-            // Финальная проверка
             if (qty <= 0 || qty * price > currentBalance) return;
 
-            // Защита от частых покупок одной пары
             if (_lastBuyTime.TryGetValue (symbol, out var lastTime) && DateTime.UtcNow - lastTime < TimeSpan.FromMinutes (2))
                 return;
             _lastBuyTime[symbol] = DateTime.UtcNow;
 
-            Log ($"💵 Покупка {qty} {symbol} по {price:F4} (сумма ~{qty * price:F2} USDC)");
+            Log ($"💵 Покупка {qty} {symbol} по {price:F4}");
             var order = await _client.PlaceOrder (symbol, "BUY", "MARKET", qty);
             if (order != null)
             {
@@ -241,11 +233,10 @@ namespace BinancePulse.Services
             if (qtyToSell <= 0.000001m)
             {
                 _positionManager.Remove (symbol);
-                Log ($"⚠️ Позиция {symbol} удалена (баланс {asset} = {spotBalance})");
+                Log ($"⚠️ Позиция {symbol} удалена (нет монет)");
                 return;
             }
 
-            // Отмена OCO-ордера, если он был установлен
             if (pos.OcoOrderListId != 0)
                 await _client.CancelOcoOrder (symbol, pos.OcoOrderListId);
 
@@ -270,8 +261,11 @@ namespace BinancePulse.Services
                     Duration = DateTime.UtcNow - pos.OpenTime,
                     Action = "SELL_CLOSE"
                 };
-                // Можно добавить сохранение в историю (пока просто лог)
+
                 _positionManager.Remove (symbol);
+                OnTradeClosed?.Invoke (trade);
+                await SaveTradeToFile (trade);
+
                 if (_telegram.IsEnabled)
                     await _telegram.SendTradeNotification (symbol, "SELL", price, qtyToSell, pnl);
             }
@@ -279,6 +273,24 @@ namespace BinancePulse.Services
             {
                 Log ($"❌ Не удалось продать {symbol}: {_client.LastOrderError}");
             }
+        }
+
+        private async Task SaveTradeToFile(TradeLog trade)
+        {
+            try
+            {
+                string filePath = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "Data", "trades.json");
+                List<TradeLog> trades = new ();
+                if (File.Exists (filePath))
+                {
+                    var json = await File.ReadAllTextAsync (filePath);
+                    trades = System.Text.Json.JsonSerializer.Deserialize<List<TradeLog>> (json) ?? new ();
+                }
+                trades.Insert (0, trade);
+                var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+                await File.WriteAllTextAsync (filePath, System.Text.Json.JsonSerializer.Serialize (trades, options));
+            }
+            catch (Exception ex) { Log ($"Ошибка сохранения истории: {ex.Message}"); }
         }
 
         private void Log(string msg) => OnLogGenerated?.Invoke (msg);
