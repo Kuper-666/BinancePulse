@@ -130,6 +130,11 @@ namespace BinancePulse.ViewModels
             IsUpdating = false;
         }
 
+        public async Task SendDailyReport()
+        {
+            await _tradingService.SendManualReport ();
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? name = null) =>
             PropertyChanged?.Invoke (this, new PropertyChangedEventArgs (name));

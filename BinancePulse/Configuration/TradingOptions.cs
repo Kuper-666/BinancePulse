@@ -22,5 +22,6 @@
         public decimal ATRMultiplierForPosition { get; set; } = 0.02m;  // размер позиции = (баланс × риск) / (ATR × множитель)
         public int ATRPeriod { get; set; } = 14;                        // период ATR (свечи)
         public decimal MaxDailyLoss { get; set; } = -20m;               // дневной лимит убытка в USDC
+        public bool EnableTelegramDailyReport { get; set; } = true;
     }
 }

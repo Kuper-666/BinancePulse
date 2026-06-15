@@ -28,6 +28,11 @@ namespace BinancePulse
             _vm?.Stop ();
         }
 
+        private async void ReportButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_vm != null) await _vm.SendDailyReport ();
+        }
+
         private async void UpdateButton_Click(object sender, RoutedEventArgs e)
         {
             if (_vm != null) await _vm.CheckForUpdates ();

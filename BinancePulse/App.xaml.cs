@@ -46,7 +46,13 @@ namespace BinancePulse
                     services.AddSingleton<BalanceRebalancerService> ();
                     services.AddSingleton<PositionManager> ();
                     services.AddSingleton<TradingStrategy> ();
-                    services.AddSingleton<PositionProtector> ();
+                    services.AddSingleton<PositionProtector> (sp =>
+                    {
+                        var client = sp.GetRequiredService<BinanceClient> ();
+                        var positionManager = sp.GetRequiredService<PositionManager> ();
+                        var options = sp.GetRequiredService<IOptions<TradingOptions>> ().Value;
+                        return new PositionProtector (client, positionManager, options);
+                    });
                     services.AddSingleton<TelegramNotifier> ();
                     services.AddSingleton<WebSocketPriceService> ();
                     services.AddSingleton<TradingService> ();
