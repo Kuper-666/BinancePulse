@@ -46,6 +46,7 @@ namespace BinancePulse
                     services.AddSingleton<BalanceRebalancerService> ();
                     services.AddSingleton<PositionManager> ();
                     services.AddSingleton<TradingStrategy> ();
+
                     services.AddSingleton<PositionProtector> (sp =>
                     {
                         var client = sp.GetRequiredService<BinanceClient> ();
@@ -53,14 +54,18 @@ namespace BinancePulse
                         var options = sp.GetRequiredService<IOptions<TradingOptions>> ().Value;
                         return new PositionProtector (client, positionManager, options);
                     });
-                    services.AddSingleton<TelegramNotifier> ();
+
+                    services.AddSingleton<TelegramNotifier> (sp =>
+                    {
+                        var telOpts = sp.GetRequiredService<IOptions<TelegramOptions>> ().Value;
+                        return new TelegramNotifier (telOpts.BotToken, telOpts.ChatId);
+                    });
+
                     services.AddSingleton<WebSocketPriceService> ();
                     services.AddSingleton<TradingService> ();
 
-                    // UpdateManager принимает Action<string> logger — передаём заглушку,
-                    // реальный лог подключается позже через MainWindowViewModel.AddLog
-                    services.AddSingleton<UpdateManager> (sp =>
-                        new UpdateManager (msg => System.Diagnostics.Debug.WriteLine (msg)));
+                    // ✅ Исправленная регистрация UpdateManager
+                    services.AddSingleton<UpdateManager> (sp => new UpdateManager (msg => { }));
 
                     services.AddSingleton<MainWindowViewModel> ();
                 })
