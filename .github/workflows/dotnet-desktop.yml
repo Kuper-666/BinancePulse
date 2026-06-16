@@ -49,8 +49,11 @@ jobs:
       run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
 
     - name: Install Inno Setup
-      run: choco install innosetup -y
-      shell: powershell
+  run: |
+    Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile "is.exe"
+    Start-Process -Wait -FilePath "is.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+    Remove-Item "is.exe" -Force
+  shell: powershell
 
     - name: Build installer
       run: |
