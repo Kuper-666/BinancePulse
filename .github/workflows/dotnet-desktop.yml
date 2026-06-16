@@ -2,8 +2,8 @@ name: .NET Desktop Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -11,26 +11,25 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Find .csproj file
-      id: find
-      shell: pwsh
+    - name: Create tag from version
+      id: version
       run: |
-        $proj = Get-ChildItem -Recurse -Filter *.csproj | Select-Object -First 1
-        if ($proj) {
-          Write-Host "Found project: $($proj.FullName)"
-          echo "PROJECT_PATH=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "PROJECT_DIR=$($proj.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-        } else {
-          Write-Error "No .csproj file found"
-          exit 1
-        }
+        $date = Get-Date -Format "yyyy.MM.dd-HHmm"
+        $tag = "v1.0.0-$date"
+        echo "tag=$tag" >> $env:GITHUB_OUTPUT
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag $tag
+        git push origin $tag
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -38,25 +37,25 @@ jobs:
         dotnet-version: '8.0.x'
 
     - name: Restore dependencies
-      run: dotnet restore "${{ env.PROJECT_PATH }}"
+      run: dotnet restore BinancePulse/BinancePulse.csproj
 
     - name: Build
-      run: dotnet build "${{ env.PROJECT_PATH }}" -c Release --no-restore
+      run: dotnet build BinancePulse/BinancePulse.csproj -c Release --no-restore
 
     - name: Publish as single file
-      run: dotnet publish "${{ env.PROJECT_PATH }}" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+      run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
 
     - name: Create archive
-      run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_v${{ github.ref_name }}.zip
+      run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.ref_name }}
-        name: Release ${{ github.ref_name }}
-        body: Автоматически созданный релиз для версии ${{ github.ref_name }}.
-        files: BinancePulse_${{ github.ref_name }}.zip
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Release ${{ steps.version.outputs.tag }}
+        body: Автоматически созданный релиз для версии ${{ steps.version.outputs.tag }}.
+        files: BinancePulse_${{ steps.version.outputs.tag }}.zip
         draft: false
-        prerelease: false
+        prerelease: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
