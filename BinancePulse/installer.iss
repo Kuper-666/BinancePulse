@@ -1,4 +1,6 @@
 ﻿; BinancePulse Installer Script
+; Версия передаётся через /DMyAppVersion=...
+
 [Setup]
 AppId={{B9E8F2A1-5C7D-4A3E-8F2C-9D7E5B4A3C2F}}
 AppName=BinancePulse
@@ -10,7 +12,7 @@ AppUpdatesURL=https://github.com/Kuper-666/BinancePulse/releases
 DefaultDirName={autopf}\BinancePulse
 DefaultGroupName=BinancePulse
 AllowNoIcons=yes
-LicenseFile=LICENSE
+; LicenseFile=LICENSE           ← УДАЛЯЕМ эту строку
 UninstallDisplayIcon={app}\BinancePulse.exe
 Compression=lzma2
 SolidCompression=yes
