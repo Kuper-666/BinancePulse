@@ -22,6 +22,7 @@ namespace BinancePulse
         {
             base.OnStartup (e);
             SetupGlobalExceptionHandling ();
+            LoggingService.Initialize ();
 
             // Сначала загружаем конфигурацию вручную, чтобы зашифровать ключи при необходимости
             var configuration = new ConfigurationBuilder ()

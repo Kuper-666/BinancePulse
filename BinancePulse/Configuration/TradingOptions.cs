@@ -1,5 +1,7 @@
 ﻿namespace BinancePulse.Configuration
 {
+    public enum StrategyType { Sma, RsiBollinger }
+
     public class TradingOptions
     {
         public decimal MinUsdcBalance { get; set; } = 5.50m;
@@ -12,16 +14,14 @@
         public decimal TakeProfitPercent { get; set; } = 0.04m;
         public decimal TrailingStopPercent { get; set; } = 0.02m;
         public int MaxConcurrentPositions { get; set; } = 3;
-
-        // 👇 Добавленные свойства (минимальная и максимальная сумма сделки в USDC)
         public decimal MinTradeAmount { get; set; } = 10m;
         public decimal MaxTradeAmount { get; set; } = 50m;
-        public decimal RiskPerTradePercent { get; set; } = 0.02m; // 2% риска на сделку
-
-        public decimal ATRMultiplierForStopLoss { get; set; } = 1.5m;   // стоп-лосс = ATR × множитель
-        public decimal ATRMultiplierForPosition { get; set; } = 0.02m;  // размер позиции = (баланс × риск) / (ATR × множитель)
-        public int ATRPeriod { get; set; } = 14;                        // период ATR (свечи)
-        public decimal MaxDailyLoss { get; set; } = -20m;               // дневной лимит убытка в USDC
+        public decimal RiskPerTradePercent { get; set; } = 0.02m;
+        public decimal ATRMultiplierForStopLoss { get; set; } = 1.5m;
+        public decimal ATRMultiplierForPosition { get; set; } = 0.02m;
+        public int ATRPeriod { get; set; } = 14;
+        public decimal MaxDailyLoss { get; set; } = -20m;
         public bool EnableTelegramDailyReport { get; set; } = true;
+        public StrategyType SelectedStrategy { get; set; } = StrategyType.Sma;
     }
 }

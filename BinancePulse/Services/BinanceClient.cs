@@ -13,7 +13,7 @@ using BinancePulse.Models;
 
 namespace BinancePulse.Services
 {
-    public class BinanceClient : IDisposable
+    public class BinanceClient : IBinanceClient
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
@@ -36,7 +36,7 @@ namespace BinancePulse.Services
         private int _currentWeight = 0;
         private DateTime _weightResetTime = DateTime.UtcNow;
 
-        // Конструктор (старый, без DI)
+        // Конструктор
         public BinanceClient(string apiKey, string apiSecret, bool useTestnet = false)
         {
             _apiKey = apiKey;
@@ -74,6 +74,7 @@ namespace BinancePulse.Services
         {
             int retryCount = 0;
             int delayMs = 1000;
+            MetricsCollector.IncrementApiCall ();
             while (true)
             {
                 var response = await _httpClient.SendAsync (request);
@@ -112,6 +113,7 @@ namespace BinancePulse.Services
                 if (response.IsSuccessStatusCode)
                 {
                     LastOrderError = null;
+                    MetricsCollector.IncrementOrder ();
                     return JObject.Parse (body);
                 }
                 else
@@ -125,6 +127,7 @@ namespace BinancePulse.Services
             {
                 LastOrderError = ex.Message;
                 Log ($"PlaceOrder EXCEPTION: {ex.Message}");
+                MetricsCollector.RecordError ("PlaceOrder");
                 return null;
             }
         }
@@ -390,7 +393,7 @@ namespace BinancePulse.Services
             }
         }
 
-        public void Dispose() => _httpClient.Dispose ();
+        public void Dispose() => _httpClient?.Dispose ();
 
         public async Task<string> GetServerInfo()
         {
