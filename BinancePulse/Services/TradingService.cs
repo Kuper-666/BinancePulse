@@ -72,6 +72,7 @@ namespace BinancePulse.Services
             if (_isRunning) return;
             _isRunning = true;
             Log ("🚀 TradingService запущен");
+            StartTelegramBot ();   // <-- добавить эту строку
             _ = Task.Run (RunMainLoopAsync);
         }
 
@@ -384,7 +385,7 @@ namespace BinancePulse.Services
             _dailyStats = new DailyStatistics { Date = DateTime.UtcNow.Date };
         }
 
-        public void StartTelegramBot()
+        private void StartTelegramBot()
         {
             if (_telegram.IsEnabled)
             {
@@ -403,7 +404,7 @@ namespace BinancePulse.Services
                                 $"📈 Сделок: {stats.TotalTrades} (✅{stats.WinningTrades} / ❌{stats.LosingTrades})\n" +
                                 $"🎯 Win Rate: {stats.WinRate:F1}%\n" +
                                 $"📉 Макс. просадка: {stats.MaxDrawdown:F2} USDC";
-                await _telegram.SendMessageAsync (report);
+                await _telegram.SendMessageAsync (report);  // отправляем в тот же чат, откуда пришла команда
             }
         }
 
