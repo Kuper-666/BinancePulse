@@ -13,7 +13,7 @@
 	  <FileVersion>$(VersionPrefix).0</FileVersion>
 
 	  <!-- Дополнительные настройки для публикации -->
-	  <ApplicationIcon>Resources\binance_bot.ico</ApplicationIcon>
+	  <ApplicationIcon>Resources\favicon.ico</ApplicationIcon>
 	  <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
   </PropertyGroup>
   <ItemGroup>
