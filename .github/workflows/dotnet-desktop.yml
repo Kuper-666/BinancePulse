@@ -29,7 +29,7 @@ jobs:
         git push origin $tag
       shell: pwsh
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -48,13 +48,25 @@ jobs:
     - name: Create archive
       run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
 
+    - name: Build installer (Inno Setup)
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
+      working-directory: .  # если installer.iss лежит в корне репозитория
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.version.outputs.tag }}
         name: Release ${{ steps.version.outputs.tag }}
-        body: Автоматически созданный релиз для версии ${{ steps.version.outputs.tag }}.
-        files: BinancePulse_${{ steps.version.outputs.tag }}.zip
+        body: |
+          Автоматически созданный релиз для версии ${{ steps.version.outputs.tag }}.
+
+          ## 📦 Состав релиза:
+          - `BinancePulse_${{ steps.version.outputs.tag }}.zip` – архив с исполняемым файлом (портативная версия)
+          - `BinancePulse_Setup.exe` – установщик (Inno Setup)
+        files: |
+          BinancePulse_${{ steps.version.outputs.tag }}.zip
+          Installers/BinancePulse_Setup.exe
         draft: false
         prerelease: true
       env:
