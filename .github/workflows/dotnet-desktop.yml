@@ -92,15 +92,15 @@ jobs:
           $issPath = ""
           if (Test-Path "installer.iss") {
             $issPath = "installer.iss"
-            } elseif (Test-Path "BinancePulse/installer.iss") {
-            $issPath = "BinancePulse/installer.iss"
-            } else {
+          } elseif (Test-Path "BinancePulse/installer.iss") {
+          $issPath = "BinancePulse/installer.iss"
+          } else {
           Write-Host "❌ installer.iss not found!"
           exit 1
           }
           Write-Host "✅ Using installer script: $issPath"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.get_version.outputs.VERSION }}" $issPath
-          shell: powershell
+        shell: powershell
 
       - name: Create Release
         if: steps.skip.outputs.skip == 'false'
