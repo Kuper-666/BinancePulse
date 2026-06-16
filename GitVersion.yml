@@ -1,0 +1,14 @@
+branches:
+  master:
+    tag: ''
+    increment: Patch
+    prevent-increment-of-merged-branch-version: false
+    track-merge-target: false
+  feature:
+    tag: alpha
+    increment: Patch
+  develop:
+    tag: beta
+    increment: Patch
+ignore:
+  sha: []
