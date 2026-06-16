@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using BinancePulse.Models;
 using BinancePulse.Services;
+using BinancePulse.Configuration;
 using FluentAssertions;
 using Xunit;
 
@@ -11,55 +12,58 @@ namespace BinancePulse.Tests
 {
     public class TradingStrategyTests
     {
-        private readonly TradingStrategy _strategy;
+        private readonly SmaStrategy _strategy;
 
         public TradingStrategyTests()
         {
-            _strategy = new TradingStrategy (null);
+            var options = new TradingOptions
+            {
+                FastSmaPeriod = 9,
+                SlowSmaPeriod = 21,
+                RsiPeriod = 14,
+                RsiBuyThreshold = 30,
+                RsiSellThreshold = 70
+            };
+            _strategy = new SmaStrategy (options);
         }
 
         [Fact]
         public async Task AnalyzeAsync_ShouldReturnBuy_WhenGoldenCrossAndLowRsi()
         {
-            // Arrange: создаём 50 свечей с восходящим трендом и RSI < 30
-            var klines = CreateKlines (50, startPrice: 100m, trend: 1.02m); // рост на 2% за свечу
-            klines.Reverse (); // последняя свеча – самая высокая
+            var klines = CreateKlines (50, startPrice: 100m, trend: 1.02m);
+            klines = klines.OrderBy (k => k.OpenTime).ToList ();
 
-            // Act
             var result = await _strategy.AnalyzeAsync ("BTCUSDC", klines);
 
-            // Assert
             result.Action.Should ().Be (TradeAction.Buy);
-            result.Reason.Should ().Contain ("Золотой крест");
+            result.Reason.Should ().Contain ("SMA");
             result.Indicators["fastSma"].Should ().BeGreaterThan (result.Indicators["slowSma"]);
         }
 
         [Fact]
         public async Task AnalyzeAsync_ShouldReturnSell_WhenDeathCrossAndHighRsi()
         {
-            // Arrange: нисходящий тренд с RSI > 70
-            var klines = CreateKlines (50, startPrice: 200m, trend: 0.98m); // падение на 2% за свечу
-            klines.Reverse ();
+            var klines = CreateKlines (50, startPrice: 200m, trend: 0.98m);
+            klines = klines.OrderBy (k => k.OpenTime).ToList ();
 
             var result = await _strategy.AnalyzeAsync ("BTCUSDC", klines);
 
             result.Action.Should ().Be (TradeAction.Sell);
-            result.Reason.Should ().Contain ("Смертельный крест");
+            result.Reason.Should ().Contain ("SMA");
             result.Indicators["fastSma"].Should ().BeLessThan (result.Indicators["slowSma"]);
         }
 
         [Fact]
         public async Task AnalyzeAsync_ShouldReturnHold_WhenNoClearSignal()
         {
-            var klines = CreateKlines (50, startPrice: 150m, trend: 1.0m); // боковик
-            klines.Reverse ();
+            var klines = CreateKlines (50, startPrice: 150m, trend: 1.0m);
+            klines = klines.OrderBy (k => k.OpenTime).ToList ();
 
             var result = await _strategy.AnalyzeAsync ("BTCUSDC", klines);
 
             result.Action.Should ().Be (TradeAction.Hold);
         }
 
-        // Вспомогательный метод для создания свечей
         private List<BinanceKline> CreateKlines(int count, decimal startPrice, decimal trend)
         {
             var list = new List<BinanceKline> ();
