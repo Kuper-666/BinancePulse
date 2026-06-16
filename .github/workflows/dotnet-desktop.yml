@@ -48,10 +48,13 @@ jobs:
     - name: Create archive
       run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
 
-    - name: Build installer (Inno Setup)
+    - name: Install Inno Setup
+      run: choco install innosetup -y
+      shell: powershell
+
+    - name: Build installer
       run: |
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
-      working-directory: .  # если installer.iss лежит в корне репозитория
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
