@@ -123,7 +123,10 @@
                     <WrapPanel Grid.Row="1" Margin="0,0,0,10">
                         <Button Content="🚀 Запуск" Width="100" Height="30" Command="{Binding Backtest.RunBacktestCommand}" Margin="0,0,5,0"/>
                         <Button Content="⚡ Оптимизация" Width="120" Height="30" Command="{Binding Backtest.RunOptimizationCommand}" Margin="0,0,5,0"/>
-                        <TextBlock Text="{Binding Backtest.Status}" Margin="10,5,0,0" Foreground="Yellow" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Backtest.Status}" 
+                                   Margin="10,5,0,0" 
+                                   Foreground="{Binding Backtest.StatusColor}" 
+                                   VerticalAlignment="Center"/>
                     </WrapPanel>
 
                     <!-- Результаты -->

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using BinancePulse.Models;
@@ -100,7 +101,7 @@ namespace BinancePulse.Services
 
                     if (sellSignal || stopHit || takeHit)
                     {
-                        decimal closedQuantity = position; // сохраняем перед обнулением
+                        decimal closedQuantity = position;
                         decimal tradePnL = ( price - entryPrice ) * closedQuantity;
                         decimal tradePnLPercent = ( price - entryPrice ) / entryPrice * 100;
                         decimal commission = price * closedQuantity * commissionPercent;
@@ -128,7 +129,7 @@ namespace BinancePulse.Services
                 equityCurve.Add (position > 0 ? position * price : capital);
             }
 
-            // Закрытие последней позиции
+            // Закрытие последней позиции с проверкой наличия хотя бы двух свечей
             if (position > 0)
             {
                 decimal lastPrice = closes.Last ();
@@ -140,7 +141,7 @@ namespace BinancePulse.Services
 
                 trades.Add (new BacktestTrade
                 {
-                    EntryTime = klines.Count > 1 ? klines[^2].OpenTime : klines[0].OpenTime,
+                    EntryTime = klines.Count >= 2 ? klines[^2].OpenTime : klines[0].OpenTime,
                     ExitTime = klines.Last ().OpenTime,
                     EntryPrice = entryPrice,
                     ExitPrice = lastPrice,

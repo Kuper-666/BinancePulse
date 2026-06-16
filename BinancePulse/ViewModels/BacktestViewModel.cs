@@ -130,8 +130,8 @@ namespace BinancePulse.ViewModels
         {
             IsRunning = true;
             Status = "Загрузка данных...";
+            StatusColor = "Yellow"; // можно добавить свойство для цвета
             Trades.Clear ();
-            OptimizationResults.Clear ();
 
             try
             {
@@ -155,16 +155,28 @@ namespace BinancePulse.ViewModels
                     foreach (var trade in result.Trades)
                         Trades.Add (trade);
                 }
-                Status = $"Завершено. Сделок: {result.TotalTrades}, Доходность: {result.TotalReturnPercent:F2}%";
+                Status = $"✅ Завершено. Сделок: {result.TotalTrades}, Доходность: {result.TotalReturnPercent:F2}%";
+                StatusColor = "LimeGreen";
             }
             catch (Exception ex)
             {
-                Status = $"Ошибка: {ex.Message}";
+                Status = $"❌ Ошибка: {ex.Message}";
+                StatusColor = "Red";
+                // Дополнительно вывести в лог, если есть доступ
+                System.Diagnostics.Debug.WriteLine ($"Backtest error: {ex}");
+                // Если есть возможность, вызвать AddLog (но его нет в этом классе, можно передать через конструктор)
             }
             finally
             {
                 IsRunning = false;
             }
+        }
+
+        private string _statusColor = "Yellow";
+        public string StatusColor
+        {
+            get => _statusColor;
+            set { _statusColor = value; OnPropertyChanged (); }
         }
 
         private async Task RunOptimizationAsync()
