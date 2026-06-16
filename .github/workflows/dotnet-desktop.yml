@@ -2,127 +2,103 @@ name: Build and Release
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'  # триггер для стабильных релизов по тегам vX.X.X
+    branches: [ "master" ]
+    paths-ignore:
+      - 'BinancePulse/BinancePulse.csproj'   # Не запускать при изменении .csproj (коммит версии)
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  # 1. Предрелиз при пуше в main
-  build-prerelease:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  build:
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Create tag from date
-        id: version
+      - name: Skip if version bump commit
+        id: skip
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd-HHmm"
-          $tag = "v1.0.0-$date"
-          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          if git log -1 --pretty=%B | grep -q "Bump version to"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Setup .NET
+        if: steps.skip.outputs.skip == 'false'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Get and increment version
+        if: steps.skip.outputs.skip == 'false'
+        id: get_version
+        shell: pwsh
+        run: |
+          $csproj = "BinancePulse/BinancePulse.csproj"
+          [xml]$xml = Get-Content $csproj
+          $current = $xml.Project.PropertyGroup.VersionPrefix
+          if (-not $current) { $current = "1.0.0" }
+          $parts = $current -split '\.'
+          $newVersion = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          Write-Host "New version: $newVersion"
+          $xml.Project.PropertyGroup.VersionPrefix = $newVersion
+          $xml.Save($csproj)
+          echo "VERSION=$newVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Commit version bump
+        if: steps.skip.outputs.skip == 'false'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag $tag
-          git push origin $tag
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+          git add BinancePulse/BinancePulse.csproj
+          git commit -m "Bump version to ${{ steps.get_version.outputs.VERSION }}" || echo "No changes"
+          git push
 
       - name: Restore
+        if: steps.skip.outputs.skip == 'false'
         run: dotnet restore BinancePulse/BinancePulse.csproj
 
       - name: Build
+        if: steps.skip.outputs.skip == 'false'
         run: dotnet build BinancePulse/BinancePulse.csproj -c Release --no-restore
 
-      - name: Publish
-        run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+      - name: Publish (single file)
+        if: steps.skip.outputs.skip == 'false'
+        run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o ./publish
 
-      - name: Create archive
-        run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
+      - name: Create ZIP archive
+        if: steps.skip.outputs.skip == 'false'
+        run: Compress-Archive -Path .\publish\* -DestinationPath BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
 
+      # ===== НОВЫЙ ШАГ: Установка Inno Setup =====
       - name: Install Inno Setup
+        if: steps.skip.outputs.skip == 'false'
         run: choco install innosetup -y
         shell: powershell
 
+      # ===== НОВЫЙ ШАГ: Сборка установщика =====
       - name: Build installer
+        if: steps.skip.outputs.skip == 'false'
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
 
-      - name: Create Pre-Release
+      - name: Create Release
+        if: steps.skip.outputs.skip == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Pre-Release ${{ steps.version.outputs.tag }}
-          body: |
-            Автоматический предрелиз от ${{ steps.version.outputs.tag }}.
-            Сборка из последнего коммита в main.
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: Release v${{ steps.get_version.outputs.VERSION }}
           files: |
-            BinancePulse_${{ steps.version.outputs.tag }}.zip
+            BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
             Installers/BinancePulse_Setup.exe
-          draft: false
-          prerelease: true
+          generate_release_notes: true
+          # Раскомментируйте следующую строку, если нужен предрелиз:
+          # prerelease: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
-
-  # 2. Стабильный релиз при создании тега vX.X.X
-  build-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Restore
-        run: dotnet restore BinancePulse/BinancePulse.csproj
-
-      - name: Build
-        run: dotnet build BinancePulse/BinancePulse.csproj -c Release --no-restore
-
-      - name: Publish
-        run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
-
-      - name: Create archive
-        run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ github.ref_name }}.zip
-
-      - name: Install Inno Setup
-        run: choco install innosetup -y
-        shell: powershell
-
-      - name: Build installer
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
-
-      - name: Create Stable Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: |
-            Стабильный релиз ${{ github.ref_name }}.
-          files: |
-            BinancePulse_${{ github.ref_name }}.zip
-            Installers/BinancePulse_Setup.exe
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
