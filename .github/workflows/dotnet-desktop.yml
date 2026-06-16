@@ -12,68 +12,65 @@ jobs:
     permissions:
       contents: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Create tag from version
-      id: version
-      run: |
-        $date = Get-Date -Format "yyyy.MM.dd-HHmm"
-        $tag = "v1.0.0-$date"
-        echo "tag=$tag" >> $env:GITHUB_OUTPUT
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag $tag
-        git push origin $tag
-      shell: pwsh
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
+      - name: Create tag from version
+        id: version
+        run: |
+          $date = Get-Date -Format "yyyy.MM.dd-HHmm"
+          $tag = "v1.0.0-$date"
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag $tag
+          git push origin $tag
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
-    - name: Restore dependencies
-      run: dotnet restore BinancePulse/BinancePulse.csproj
+      - name: Restore dependencies
+        run: dotnet restore BinancePulse/BinancePulse.csproj
 
-    - name: Build
-      run: dotnet build BinancePulse/BinancePulse.csproj -c Release --no-restore
+      - name: Build
+        run: dotnet build BinancePulse/BinancePulse.csproj -c Release --no-restore
 
-    - name: Publish as single file
-      run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+      - name: Publish as single file
+        run: dotnet publish BinancePulse/BinancePulse.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
 
-    - name: Create archive
-      run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
+      - name: Create archive
+        run: Compress-Archive -Path ./publish/* -DestinationPath BinancePulse_${{ steps.version.outputs.tag }}.zip
 
-    - name: Install Inno Setup
-  run: |
-    Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile "is.exe"
-    Start-Process -Wait -FilePath "is.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
-    Remove-Item "is.exe" -Force
-  shell: powershell
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+        shell: powershell
 
-    - name: Build installer
-      run: |
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.version.outputs.tag }}
-        name: Release ${{ steps.version.outputs.tag }}
-        body: |
-          Автоматически созданный релиз для версии ${{ steps.version.outputs.tag }}.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          body: |
+            Автоматически созданный релиз для версии ${{ steps.version.outputs.tag }}.
 
-          ## 📦 Состав релиза:
-          - `BinancePulse_${{ steps.version.outputs.tag }}.zip` – архив с исполняемым файлом (портативная версия)
-          - `BinancePulse_Setup.exe` – установщик (Inno Setup)
-        files: |
-          BinancePulse_${{ steps.version.outputs.tag }}.zip
-          Installers/BinancePulse_Setup.exe
-        draft: false
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
+            ## 📦 Состав релиза:
+            - `BinancePulse_${{ steps.version.outputs.tag }}.zip` – архив с исполняемым файлом (портативная версия)
+            - `BinancePulse_Setup.exe` – установщик (Inno Setup)
+          files: |
+            BinancePulse_${{ steps.version.outputs.tag }}.zip
+            Installers/BinancePulse_Setup.exe
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
