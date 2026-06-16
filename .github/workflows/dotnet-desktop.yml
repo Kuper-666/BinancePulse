@@ -16,8 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN_PULSE }}
           fetch-depth: 0
+          # token не указываем – используется встроенный GITHUB_TOKEN
+          # (но он автоматически применяется для checkout)
 
       - name: Skip if version bump commit
         id: skip
@@ -56,9 +57,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Обновляем remote, чтобы использовать GITHUB_TOKEN
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git add BinancePulse/BinancePulse.csproj
           git commit -m "Bump version to ${{ steps.get_version.outputs.VERSION }}" || echo "No changes"
           git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Restore
         if: steps.skip.outputs.skip == 'false'
@@ -84,7 +89,6 @@ jobs:
       - name: Build installer
         if: steps.skip.outputs.skip == 'false'
         run: |
-          # Поиск файла installer.iss
           $issPath = ""
           if (Test-Path "installer.iss") {
             $issPath = "installer.iss"
@@ -109,4 +113,4 @@ jobs:
             Installers/BinancePulse_Setup.exe
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
