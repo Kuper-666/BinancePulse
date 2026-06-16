@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:oxy="http://oxyplot.org/wpf"
-        Title="BinancePulse" Height="600" Width="900"
+        Title="BinancePulse" Height="700" Width="1000"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -27,6 +27,7 @@
         </StackPanel>
 
         <TabControl Grid.Row="1">
+            <!-- Торговля -->
             <TabItem Header="📈 Торговля">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -47,6 +48,7 @@
                 </Grid>
             </TabItem>
 
+            <!-- История сделок -->
             <TabItem Header="📊 История сделок">
                 <DataGrid ItemsSource="{Binding TradesHistory}" AutoGenerateColumns="False"
                           CanUserAddRows="False" HeadersVisibility="Column">
@@ -64,10 +66,12 @@
                 </DataGrid>
             </TabItem>
 
+            <!-- График баланса -->
             <TabItem Header="📉 График баланса">
                 <oxy:PlotView Model="{Binding BalancePlotModel}" Background="#1e1e1e"/>
             </TabItem>
 
+            <!-- Открытые позиции -->
             <TabItem Header="📋 Открытые позиции">
                 <DataGrid ItemsSource="{Binding Positions}" AutoGenerateColumns="False"
                           CanUserAddRows="False" HeadersVisibility="Column"
@@ -84,6 +88,103 @@
                         <DataGridTextColumn Header="Время" Binding="{Binding DurationDisplay}" Width="80"/>
                     </DataGrid.Columns>
                 </DataGrid>
+            </TabItem>
+
+            <!-- Бэктест + Оптимизация -->
+            <TabItem Header="🧪 Бэктест">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Панель параметров -->
+                    <WrapPanel Grid.Row="0" Margin="0,0,0,10">
+                        <TextBlock Text="Пара:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding Backtest.Symbol}" Width="100" Margin="0,0,10,0"/>
+                        <TextBlock Text="С:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding Backtest.StartDate}" Width="120" Margin="0,0,10,0"/>
+                        <TextBlock Text="По:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding Backtest.EndDate}" Width="120" Margin="0,0,10,0"/>
+                        <TextBlock Text="SMA:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding Backtest.FastSma}" Width="40" Margin="0,0,5,0"/>
+                        <TextBox Text="{Binding Backtest.SlowSma}" Width="40" Margin="0,0,10,0"/>
+                        <TextBlock Text="RSI:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding Backtest.RsiPeriod}" Width="40" Margin="0,0,5,0"/>
+                        <TextBox Text="{Binding Backtest.RsiBuy}" Width="40" Margin="0,0,5,0"/>
+                        <TextBox Text="{Binding Backtest.RsiSell}" Width="40" Margin="0,0,10,0"/>
+                        <TextBlock Text="SL/TP:" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding Backtest.StopLoss, StringFormat=F2}" Width="50" Margin="0,0,5,0"/>
+                        <TextBox Text="{Binding Backtest.TakeProfit, StringFormat=F2}" Width="50" Margin="0,0,10,0"/>
+                    </WrapPanel>
+
+                    <!-- Кнопки управления -->
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,10">
+                        <Button Content="🚀 Запуск" Width="100" Height="30" Command="{Binding Backtest.RunBacktestCommand}" Margin="0,0,5,0"/>
+                        <Button Content="⚡ Оптимизация" Width="120" Height="30" Command="{Binding Backtest.RunOptimizationCommand}" Margin="0,0,5,0"/>
+                        <TextBlock Text="{Binding Backtest.Status}" Margin="10,5,0,0" Foreground="Yellow" VerticalAlignment="Center"/>
+                    </WrapPanel>
+
+                    <!-- Результаты -->
+                    <TabControl Grid.Row="2">
+                        <TabItem Header="📊 Сводка">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <WrapPanel Grid.Row="0" Margin="0,0,0,5">
+                                    <Border Background="#2c3e50" Padding="10" Margin="5" CornerRadius="5">
+                                        <StackPanel>
+                                            <TextBlock Text="Доходность" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Backtest.Result.TotalReturnPercent, StringFormat={}{0:F2}%}" Foreground="LimeGreen" FontSize="16"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#2c3e50" Padding="10" Margin="5" CornerRadius="5">
+                                        <StackPanel>
+                                            <TextBlock Text="Win Rate" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Backtest.Result.WinRate, StringFormat={}{0:F1}%}" Foreground="LimeGreen" FontSize="16"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#2c3e50" Padding="10" Margin="5" CornerRadius="5">
+                                        <StackPanel>
+                                            <TextBlock Text="Сделок" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Backtest.Result.TotalTrades}" Foreground="Yellow" FontSize="16"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#2c3e50" Padding="10" Margin="5" CornerRadius="5">
+                                        <StackPanel>
+                                            <TextBlock Text="Max Drawdown" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Backtest.Result.MaxDrawdown, StringFormat={}{0:F1}%}" Foreground="Red" FontSize="16"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#2c3e50" Padding="10" Margin="5" CornerRadius="5">
+                                        <StackPanel>
+                                            <TextBlock Text="Sharpe" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Backtest.Result.SharpeRatio, StringFormat=F2}" Foreground="Cyan" FontSize="16"/>
+                                        </StackPanel>
+                                    </Border>
+                                </WrapPanel>
+                                <!-- График equity можно добавить отдельно -->
+                            </Grid>
+                        </TabItem>
+
+                        <TabItem Header="📋 Сделки">
+                            <DataGrid ItemsSource="{Binding Backtest.Trades}" AutoGenerateColumns="False" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Вход" Binding="{Binding EntryTime, StringFormat=dd.MM HH:mm}" Width="100"/>
+                                    <DataGridTextColumn Header="Выход" Binding="{Binding ExitTime, StringFormat=dd.MM HH:mm}" Width="100"/>
+                                    <DataGridTextColumn Header="Цена входа" Binding="{Binding EntryPrice, StringFormat=F4}" Width="100"/>
+                                    <DataGridTextColumn Header="Цена выхода" Binding="{Binding ExitPrice, StringFormat=F4}" Width="100"/>
+                                    <DataGridTextColumn Header="PnL USDC" Binding="{Binding PnL, StringFormat=F2}" Width="100"/>
+                                    <DataGridTextColumn Header="PnL %" Binding="{Binding PnLPercent, StringFormat=F2}" Width="80"/>
+                                    <DataGridTextColumn Header="Причина" Binding="{Binding Reason}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
             </TabItem>
         </TabControl>
     </Grid>

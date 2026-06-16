@@ -80,6 +80,8 @@ namespace BinancePulse
                     services.AddSingleton<BalanceRebalancerService> ();
                     services.AddSingleton<PositionManager> ();
                     services.AddSingleton<TradingStrategy> ();
+                    services.AddSingleton<BacktestEngine> ();
+                    services.AddSingleton<BacktestViewModel> ();
 
                     // PositionProtector требует BinanceClient, PositionManager и TradingOptions
                     services.AddSingleton<PositionProtector> (sp =>

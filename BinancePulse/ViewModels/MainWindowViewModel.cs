@@ -50,6 +50,7 @@ namespace BinancePulse.ViewModels
         public string UpdateStatus { get => _updateStatus; set { _updateStatus = value; OnPropertyChanged (); } }
         public bool IsUpdating { get => _isUpdating; set { _isUpdating = value; OnPropertyChanged (); } }
         public string PauseStatus { get => _pauseStatus; set { _pauseStatus = value; OnPropertyChanged (); } }
+        public BacktestViewModel Backtest { get; set; }
 
         public Action<string>? AddLog { get; set; }
 
@@ -64,7 +65,7 @@ namespace BinancePulse.ViewModels
         private LineSeries _balanceSeries;
         private ScatterSeries _tradeMarkers;
 
-        public MainWindowViewModel(TradingService tradingService, UpdateManager updateManager)
+        public MainWindowViewModel(TradingService tradingService, UpdateManager updateManager, BacktestViewModel backtest)
         {
             _tradingService = tradingService;
             _updateManager = updateManager;
@@ -92,6 +93,7 @@ namespace BinancePulse.ViewModels
             _positionsTimer.Start ();
 
             InitializePlot ();
+            Backtest = backtest;
         }
 
         private void InitializePlot()
