@@ -84,9 +84,10 @@ jobs:
 
       # ===== НОВЫЙ ШАГ: Сборка установщика =====
       - name: Build installer
-        if: steps.skip.outputs.skip == 'false'
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2
+        with:
+         path: BinancePulse/installer.iss   # путь к вашему .iss файлу
+         options: /Qp                     # опционально: тихий режим
 
       - name: Create Release
         if: steps.skip.outputs.skip == 'false'
