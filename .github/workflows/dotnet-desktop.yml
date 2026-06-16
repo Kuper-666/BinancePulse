@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
     paths-ignore:
-      - 'BinancePulse/BinancePulse.csproj'   # Не запускать при изменении .csproj (коммит версии)
+      - 'BinancePulse/BinancePulse.csproj'
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN_PULSE }}
           fetch-depth: 0
 
       - name: Skip if version bump commit
@@ -76,18 +76,27 @@ jobs:
         if: steps.skip.outputs.skip == 'false'
         run: Compress-Archive -Path .\publish\* -DestinationPath BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
 
-      # ===== НОВЫЙ ШАГ: Установка Inno Setup =====
       - name: Install Inno Setup
         if: steps.skip.outputs.skip == 'false'
         run: choco install innosetup -y
         shell: powershell
 
-      # ===== НОВЫЙ ШАГ: Сборка установщика =====
       - name: Build installer
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2
-        with:
-         path: BinancePulse/installer.iss   # путь к вашему .iss файлу
-         options: /Qp                     # опционально: тихий режим
+        if: steps.skip.outputs.skip == 'false'
+        run: |
+          # Поиск файла installer.iss
+          $issPath = ""
+          if (Test-Path "installer.iss") {
+            $issPath = "installer.iss"
+          } elseif (Test-Path "BinancePulse/installer.iss") {
+            $issPath = "BinancePulse/installer.iss"
+          } else {
+            Write-Host "❌ installer.iss not found!"
+            exit 1
+          }
+          Write-Host "✅ Using installer script: $issPath"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" $issPath
+        shell: powershell
 
       - name: Create Release
         if: steps.skip.outputs.skip == 'false'
@@ -99,7 +108,5 @@ jobs:
             BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
             Installers/BinancePulse_Setup.exe
           generate_release_notes: true
-          # Раскомментируйте следующую строку, если нужен предрелиз:
-          # prerelease: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
