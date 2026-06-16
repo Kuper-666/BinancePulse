@@ -15,9 +15,6 @@ namespace BinancePulse.Services
             _client = client;
         }
 
-        /// <summary>
-        /// Запуск бэктеста на исторических данных для одной пары
-        /// </summary>
         public async Task<BacktestResult> RunAsync(
             string symbol,
             DateTime startDate,
@@ -30,19 +27,15 @@ namespace BinancePulse.Services
             decimal stopLossPercent,
             decimal takeProfitPercent,
             decimal initialCapital = 1000m,
-            decimal commissionPercent = 0.001m) // 0.1% комиссия
+            decimal commissionPercent = 0.001m)
         {
-            // Загружаем исторические свечи (интервал 5 минут)
-            // Для бэктеста загружаем максимум свечей (Binance отдаёт до 1000)
             var klines = await _client.GetKlinesAsync (symbol, "5m", 1000);
             if (klines == null || klines.Count < slowSma + 10)
-            {
                 return new BacktestResult { TotalTrades = 0, EquityCurve = new List<decimal> { initialCapital } };
-            }
 
-            // Фильтруем по дате
             klines = klines.Where (k => k.OpenTime >= startDate && k.OpenTime <= endDate).ToList ();
-            if (klines.Count < 100) return new BacktestResult { TotalTrades = 0, EquityCurve = new List<decimal> { initialCapital } };
+            if (klines.Count < 100)
+                return new BacktestResult { TotalTrades = 0, EquityCurve = new List<decimal> { initialCapital } };
 
             var closes = klines.Select (k => k.Close).ToList ();
             var highs = klines.Select (k => k.High).ToList ();
@@ -58,19 +51,17 @@ namespace BinancePulse.Services
             List<BacktestTrade> trades = new ();
             List<decimal> equityCurve = new () { initialCapital };
 
-            // Предрасчёт индикаторов
             var fastSmaValues = CalculateSma (closes, fastSma);
             var slowSmaValues = CalculateSma (closes, slowSma);
             var rsiValues = CalculateRsi (closes, rsiPeriod);
 
-            for (int i = slowSma + 5; i < closes.Count; i++)
+            for (int i = Math.Max (slowSma + 5, 1); i < closes.Count; i++)
             {
                 decimal price = closes[i];
                 decimal fastSmaVal = fastSmaValues[i];
                 decimal slowSmaVal = slowSmaValues[i];
                 decimal rsi = rsiValues[i];
 
-                // Генерация сигнала
                 bool buySignal = false;
                 bool sellSignal = false;
 
@@ -79,28 +70,19 @@ namespace BinancePulse.Services
                     bool fastAboveSlow = fastSmaVal > slowSmaVal;
                     bool prevFastAboveSlow = fastSmaValues[i - 1] > slowSmaValues[i - 1];
 
-                    // Золотой крест (быстрая SMA пересекает медленную снизу вверх) + RSI < порог
                     if (!prevFastAboveSlow && fastAboveSlow && rsi < rsiBuyThreshold)
-                    {
                         buySignal = true;
-                    }
 
-                    // Смертельный крест (быстрая SMA пересекает медленную сверху вниз) + RSI > порог
                     if (prevFastAboveSlow && !fastAboveSlow && rsi > rsiSellThreshold)
-                    {
                         sellSignal = true;
-                    }
                 }
 
-                // Логика открытия/закрытия
                 if (position == 0 && buySignal)
                 {
-                    // Покупка
                     decimal qty = capital / price;
                     qty = Math.Round (qty, 6);
                     if (qty > 0)
                     {
-                        // Вычитаем комиссию
                         decimal commission = qty * price * commissionPercent;
                         capital -= commission;
                         position = qty;
@@ -109,7 +91,6 @@ namespace BinancePulse.Services
                 }
                 else if (position > 0)
                 {
-                    // Проверка стоп-лосса и тейк-профита
                     decimal profitPercent = ( price - entryPrice ) / entryPrice;
                     decimal stopPrice = entryPrice * ( 1 - stopLossPercent );
                     decimal takePrice = entryPrice * ( 1 + takeProfitPercent );
@@ -119,28 +100,25 @@ namespace BinancePulse.Services
 
                     if (sellSignal || stopHit || takeHit)
                     {
-                        // Закрытие позиции
-                        decimal tradePnL = ( price - entryPrice ) * position;
+                        decimal closedQuantity = position; // сохраняем перед обнулением
+                        decimal tradePnL = ( price - entryPrice ) * closedQuantity;
                         decimal tradePnLPercent = ( price - entryPrice ) / entryPrice * 100;
-
-                        // Вычитаем комиссию при продаже
-                        decimal commission = price * position * commissionPercent;
-                        capital += position * price - commission;
+                        decimal commission = price * closedQuantity * commissionPercent;
+                        capital += closedQuantity * price - commission;
                         position = 0;
 
                         trades.Add (new BacktestTrade
                         {
-                            EntryTime = klines[i - 1].OpenTime,
+                            EntryTime = i > 0 ? klines[i - 1].OpenTime : klines[i].OpenTime,
                             ExitTime = klines[i].OpenTime,
                             EntryPrice = entryPrice,
                             ExitPrice = price,
-                            Quantity = position,
+                            Quantity = closedQuantity,
                             PnL = tradePnL,
                             PnLPercent = tradePnLPercent,
                             Reason = stopHit ? "Stop Loss" : takeHit ? "Take Profit" : "Signal Sell"
                         });
 
-                        // Обновление максимальной просадки
                         if (capital > peakCapital) peakCapital = capital;
                         decimal drawdown = ( peakCapital - capital ) / peakCapital * 100;
                         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
@@ -150,22 +128,23 @@ namespace BinancePulse.Services
                 equityCurve.Add (position > 0 ? position * price : capital);
             }
 
-            // Закрытие последней позиции, если осталась
+            // Закрытие последней позиции
             if (position > 0)
             {
                 decimal lastPrice = closes.Last ();
-                decimal tradePnL = ( lastPrice - entryPrice ) * position;
+                decimal closedQuantity = position;
+                decimal tradePnL = ( lastPrice - entryPrice ) * closedQuantity;
                 decimal tradePnLPercent = ( lastPrice - entryPrice ) / entryPrice * 100;
-                decimal commission = lastPrice * position * commissionPercent;
-                capital += position * lastPrice - commission;
+                decimal commission = lastPrice * closedQuantity * commissionPercent;
+                capital += closedQuantity * lastPrice - commission;
 
                 trades.Add (new BacktestTrade
                 {
-                    EntryTime = klines[^2].OpenTime,
+                    EntryTime = klines.Count > 1 ? klines[^2].OpenTime : klines[0].OpenTime,
                     ExitTime = klines.Last ().OpenTime,
                     EntryPrice = entryPrice,
                     ExitPrice = lastPrice,
-                    Quantity = position,
+                    Quantity = closedQuantity,
                     PnL = tradePnL,
                     PnLPercent = tradePnLPercent,
                     Reason = "Close at end"
@@ -174,7 +153,6 @@ namespace BinancePulse.Services
                 position = 0;
             }
 
-            // Расчёт метрик
             decimal totalReturn = ( capital - initialCapital ) / initialCapital * 100;
             int totalTrades = trades.Count;
             int winningTrades = trades.Count (t => t.PnL > 0);
@@ -188,7 +166,6 @@ namespace BinancePulse.Services
                 profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0;
             }
 
-            // Sharpe Ratio (упрощённо)
             decimal sharpeRatio = 0;
             if (equityCurve.Count > 1)
             {
@@ -219,7 +196,6 @@ namespace BinancePulse.Services
             };
         }
 
-        // Вспомогательные методы индикаторов (можно вынести в отдельный статический класс)
         private List<decimal> CalculateSma(List<decimal> data, int period)
         {
             var result = new List<decimal> ();
@@ -235,7 +211,6 @@ namespace BinancePulse.Services
 
         private List<decimal> CalculateRsi(List<decimal> closes, int period)
         {
-            // Простая реализация RSI (можно взять из TechnicalAnalysis)
             var rsiValues = new List<decimal> ();
             if (closes.Count <= period) return rsiValues;
 

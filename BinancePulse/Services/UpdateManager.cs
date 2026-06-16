@@ -14,7 +14,7 @@ namespace BinancePulse.Services
     public class UpdateManager
     {
         private const string GitHubOwner = "Kuper-666";
-        private const string GitHubRepo = "BinancePulse";   // название вашего репозитория
+        private const string GitHubRepo = "BinancePulse";
         private static readonly Version CurrentVersion = Assembly.GetExecutingAssembly ().GetName ().Version ?? new Version ("1.0.0");
         private readonly HttpClient _httpClient;
         private readonly Action<string> _logger;
@@ -50,9 +50,11 @@ namespace BinancePulse.Services
                     return false;
                 }
 
+                // Берём последний релиз (независимо от флага prerelease)
                 var latestRelease = releases
                     .OrderByDescending (r => r["published_at"]?.Value<DateTime> () ?? DateTime.MinValue)
                     .First ();
+
                 string latestTag = latestRelease["tag_name"]?.ToString () ?? "v0.0.0";
                 string latestVersionStr = latestTag.TrimStart ('v');
                 if (!Version.TryParse (latestVersionStr, out var latestVersion))
@@ -71,11 +73,8 @@ namespace BinancePulse.Services
 
                 if (!silent && MessageBox.Show ($"Доступна версия {latestVersion}. Обновить сейчас?",
                                                 "Обновление", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-                {
                     return false;
-                }
 
-                // Скачивание и установка
                 var asset = latestRelease["assets"]?.FirstOrDefault (a => a["name"].ToString ().EndsWith (".zip"));
                 if (asset == null)
                 {
