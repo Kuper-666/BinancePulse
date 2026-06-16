@@ -22,19 +22,19 @@ namespace BinancePulse.Services
         private readonly WebSocketPriceService _webSocket;
         private readonly TradingOptions _tradingOptions;
         private bool _isRunning;
+        private bool _isPaused;
         private List<string> _activePairs = new ();
         private readonly object _pairsLock = new ();
         private readonly Dictionary<string, DateTime> _lastBuyTime = new ();
+        private DailyStatistics _dailyStats = new ();
+        private Timer _dailyReportTimer;
 
         public event Action<string> OnLogGenerated;
         public event Action<TradeLog> OnTradeClosed;
         public event Action<string, decimal, TradeAction> OnMarketUpdate;
-
-        private decimal _dailyPnL = 0;
-        private DateTime _lastResetDate = DateTime.UtcNow.Date;
-
-        private DailyStatistics _dailyStats = new ();
-        private Timer _dailyReportTimer;
+        public event Action<DateTime, decimal> OnBalanceUpdate;
+        public event Action OnPositionChanged;
+        public event Action<bool> OnPauseStatusChanged; // true = пауза, false = работает
 
         public TradingService(
             BinanceClient client,
@@ -58,6 +58,13 @@ namespace BinancePulse.Services
             _telegram = telegram;
             _webSocket = webSocket;
             _tradingOptions = tradingOptions.Value;
+
+            // Подписка на события PositionManager
+            _positionManager.PositionAdded += _ => OnPositionChanged?.Invoke ();
+            _positionManager.PositionUpdated += _ => OnPositionChanged?.Invoke ();
+            _positionManager.PositionRemoved += _ => OnPositionChanged?.Invoke ();
+
+            // Таймер для дневного отчёта
             if (_tradingOptions.EnableTelegramDailyReport && _telegram.IsEnabled)
             {
                 var now = DateTime.UtcNow;
@@ -71,8 +78,9 @@ namespace BinancePulse.Services
         {
             if (_isRunning) return;
             _isRunning = true;
+            _isPaused = false;
             Log ("🚀 TradingService запущен");
-            StartTelegramBot ();   // <-- добавить эту строку
+            StartTelegramBot ();
             _ = Task.Run (RunMainLoopAsync);
         }
 
@@ -83,9 +91,51 @@ namespace BinancePulse.Services
             _webSocket?.Dispose ();
         }
 
+        public void PauseTrading()
+        {
+            _isPaused = true;
+            OnPauseStatusChanged?.Invoke (true);
+            Log ("⏸ Торговля приостановлена");
+        }
+
+        public void ResumeTrading()
+        {
+            _isPaused = false;
+            OnPauseStatusChanged?.Invoke (false);
+            Log ("▶️ Торговля возобновлена");
+        }
+
+        public bool IsPaused => _isPaused;
+
         public async Task<decimal> GetUsdcBalanceAsync()
         {
             return await _client.GetAccountBalanceAsync ("USDC");
+        }
+
+        public List<PositionDisplayItem> GetPositionsWithCurrentPrice()
+        {
+            var result = new List<PositionDisplayItem> ();
+            foreach (var pos in _positionManager.GetAllPositions ())
+            {
+                decimal currentPrice = GetCurrentPrice (pos.Symbol);
+                if (currentPrice <= 0) currentPrice = pos.EntryPrice;
+                result.Add (new PositionDisplayItem
+                {
+                    Symbol = pos.Symbol,
+                    Quantity = pos.Quantity,
+                    EntryPrice = pos.EntryPrice,
+                    CurrentPrice = currentPrice,
+                    StopLossPrice = pos.StopLossPrice,
+                    TakeProfitPrice = pos.TakeProfitPrice,
+                    OpenTime = pos.OpenTime
+                });
+            }
+            return result;
+        }
+
+        public async Task SendManualReport()
+        {
+            await SendDailyReport ();
         }
 
         private async Task RunMainLoopAsync()
@@ -98,8 +148,15 @@ namespace BinancePulse.Services
             {
                 try
                 {
+                    if (_isPaused)
+                    {
+                        await Task.Delay (5000);
+                        continue;
+                    }
+
                     decimal spotBalance = await _client.GetAccountBalanceAsync ("USDC");
                     Log ($"💰 Баланс USDC: {spotBalance:F2}");
+                    OnBalanceUpdate?.Invoke (DateTime.Now, spotBalance);
 
                     var toClose = await _protector.CheckAndProtectAsync (GetCurrentPrice);
                     foreach (var sym in toClose)
@@ -121,6 +178,7 @@ namespace BinancePulse.Services
                     foreach (var symbol in pairs)
                     {
                         if (!_isRunning) break;
+                        if (_isPaused) break;
 
                         var klines = await _client.GetKlinesAsync (symbol, "5m", 50);
                         if (klines == null || klines.Count < 30) continue;
@@ -186,6 +244,7 @@ namespace BinancePulse.Services
                 Log ($"📂 Загружено {_positionManager.Count} открытых позиций");
                 foreach (var sym in _positionManager.GetSymbols ())
                     Log ($"   - {sym}");
+                OnPositionChanged?.Invoke ();
             }
             catch (Exception ex) { Log ($"❌ Ошибка загрузки позиций: {ex.Message}"); }
         }
@@ -200,41 +259,34 @@ namespace BinancePulse.Services
             decimal fastSma = indicators.ContainsKey ("fastSma") ? indicators["fastSma"] : 0;
             decimal slowSma = indicators.ContainsKey ("slowSma") ? indicators["slowSma"] : 0;
 
-            // Проверка дневного лимита убытка
             if (IsDailyLossLimitExceeded ())
             {
                 Log ($"⛔ Дневной лимит убытка ({_tradingOptions.MaxDailyLoss} USDC) превышен. Сделка отменена.");
                 return;
             }
 
-            // Условия входа
             if (!( rsi < _tradingOptions.RsiBuyThreshold && fastSma > slowSma )) return;
 
-            // Динамический размер позиции на основе ATR
             decimal qty = await CalculateDynamicQuantity (symbol, currentBalance, price);
             if (qty <= 0 || qty * price > currentBalance) return;
 
-            // Защита от частых покупок одной пары
             if (_lastBuyTime.TryGetValue (symbol, out var lastTime) && DateTime.UtcNow - lastTime < TimeSpan.FromMinutes (2))
                 return;
             _lastBuyTime[symbol] = DateTime.UtcNow;
 
-            // Получаем ATR для логирования и уровней
             var atr = await _client.GetATRAsync (symbol, _tradingOptions.ATRPeriod);
             if (atr <= 0) atr = price * 0.01m;
-
-            // Логирование ATR и размера позиции
+            decimal baseVolatility = price * 0.01m;
+            decimal volatilityFactor = baseVolatility / atr;
+            volatilityFactor = Math.Clamp (volatilityFactor, 0.5m, 2.0m);
             decimal riskUsdc = currentBalance * _tradingOptions.RiskPerTradePercent;
-            decimal positionUsdc = qty * price;
-            decimal volatilityFactor = positionUsdc / riskUsdc;
             Log ($"📊 ATR для {symbol}: {atr:F4} (множитель волатильности: {volatilityFactor:F2})");
-            Log ($"💰 Размер позиции: {qty} {symbol} (сумма {positionUsdc:F2} USDC, риск {riskUsdc:F2} USDC)");
+            Log ($"💰 Размер позиции: {qty} {symbol} (сумма {qty * price:F2} USDC, риск {riskUsdc:F2} USDC)");
 
             Log ($"💵 Покупка {qty} {symbol} по {price:F4}");
             var order = await _client.PlaceOrder (symbol, "BUY", "MARKET", qty);
             if (order != null)
             {
-                // Адаптивные уровни стоп-лосс и тейк-профит
                 decimal stopPrice = price - atr * _tradingOptions.ATRMultiplierForStopLoss;
                 stopPrice = Math.Max (stopPrice, price * 0.9m);
                 decimal takePrice = price + atr * 2.5m;
@@ -252,7 +304,9 @@ namespace BinancePulse.Services
                     OcoOrderListId = 0
                 };
                 _positionManager.AddOrUpdate (symbol, pos);
+                OnPositionChanged?.Invoke ();
                 Log ($"✅ Куплено {qty} {symbol}");
+
                 if (_telegram.IsEnabled)
                     await _telegram.SendTradeNotification (symbol, "BUY", price, qty);
             }
@@ -269,11 +323,11 @@ namespace BinancePulse.Services
             if (qtyToSell <= 0.000001m)
             {
                 _positionManager.Remove (symbol);
+                OnPositionChanged?.Invoke ();
                 Log ($"⚠️ Позиция {symbol} удалена (нет монет)");
                 return;
             }
 
-            // Отмена OCO-ордера, если есть
             if (pos.OcoOrderListId != 0)
                 await _client.CancelOcoOrder (symbol, pos.OcoOrderListId);
 
@@ -284,7 +338,6 @@ namespace BinancePulse.Services
                 decimal pnlPct = ( price / pos.EntryPrice - 1 ) * 100;
                 Log ($"🔒 Закрыта {symbol}: PnL {pnl:F2} ({pnlPct:F2}%)");
 
-                // Создаём запись сделки
                 var trade = new TradeLog
                 {
                     Symbol = symbol,
@@ -301,10 +354,9 @@ namespace BinancePulse.Services
                 };
 
                 _positionManager.Remove (symbol);
+                OnPositionChanged?.Invoke ();
                 OnTradeClosed?.Invoke (trade);
                 await SaveTradeToFile (trade);
-
-                // Обновление дневной статистики
                 UpdateDailyPnL (pnl);
 
                 if (_telegram.IsEnabled)
@@ -314,6 +366,44 @@ namespace BinancePulse.Services
             {
                 Log ($"❌ Не удалось продать {symbol}: {_client.LastOrderError}");
             }
+        }
+
+        private async Task<decimal> CalculateDynamicQuantity(string symbol, decimal currentBalance, decimal currentPrice)
+        {
+            var atr = await _client.GetATRAsync (symbol, _tradingOptions.ATRPeriod);
+            if (atr <= 0.0001m) atr = currentPrice * 0.01m;
+
+            decimal baseVolatility = currentPrice * 0.01m;
+            decimal volatilityFactor = baseVolatility / atr;
+            volatilityFactor = Math.Clamp (volatilityFactor, 0.5m, 2.0m);
+
+            decimal riskUsdc = currentBalance * _tradingOptions.RiskPerTradePercent;
+            decimal positionUsdc = riskUsdc * volatilityFactor;
+            positionUsdc = Math.Clamp (positionUsdc, _tradingOptions.MinTradeAmount, _tradingOptions.MaxTradeAmount);
+
+            decimal qty = positionUsdc / currentPrice;
+            decimal stepSize = await _client.GetStepSizeAsync (symbol);
+            qty = Math.Floor (qty / stepSize) * stepSize;
+            return qty;
+        }
+
+        private decimal _dailyPnL = 0;
+        private DateTime _lastResetDate = DateTime.UtcNow.Date;
+
+        private void UpdateDailyPnL(decimal pnl)
+        {
+            if (DateTime.UtcNow.Date != _lastResetDate)
+            {
+                _dailyPnL = 0;
+                _lastResetDate = DateTime.UtcNow.Date;
+                Log ("🔄 Дневной счётчик PnL сброшен");
+            }
+            _dailyPnL += pnl;
+        }
+
+        private bool IsDailyLossLimitExceeded()
+        {
+            return _dailyPnL <= _tradingOptions.MaxDailyLoss;
         }
 
         private async Task SaveTradeToFile(TradeLog trade)
@@ -334,57 +424,6 @@ namespace BinancePulse.Services
             catch (Exception ex) { Log ($"Ошибка сохранения истории: {ex.Message}"); }
         }
 
-        private async Task<decimal> CalculateDynamicQuantity(string symbol, decimal currentBalance, decimal currentPrice)
-        {
-            var atr = await _client.GetATRAsync (symbol, _tradingOptions.ATRPeriod);
-            if (atr <= 0.0001m) atr = currentPrice * 0.01m; // fallback
-
-            // Размер позиции в USDC = (баланс × риск%) × (базовая волатильность / текущая ATR)
-            // Базовая волатильность = 1% от цены (условно)
-            decimal baseVolatility = currentPrice * 0.01m;
-            decimal volatilityFactor = baseVolatility / atr;
-            volatilityFactor = Math.Clamp (volatilityFactor, 0.5m, 2.0m);
-
-            decimal riskUsdc = currentBalance * _tradingOptions.RiskPerTradePercent;
-            decimal positionUsdc = riskUsdc * volatilityFactor;
-            positionUsdc = Math.Clamp (positionUsdc, _tradingOptions.MinTradeAmount, _tradingOptions.MaxTradeAmount);
-
-            decimal qty = positionUsdc / currentPrice;
-            decimal stepSize = await _client.GetStepSizeAsync (symbol);
-            qty = Math.Floor (qty / stepSize) * stepSize;
-            return qty;
-        }
-
-        private void UpdateDailyPnL(decimal pnl)
-        {
-            if (DateTime.UtcNow.Date != _lastResetDate)
-            {
-                _dailyPnL = 0;
-                _lastResetDate = DateTime.UtcNow.Date;
-                Log ("🔄 Дневной счётчик PnL сброшен");
-            }
-            _dailyPnL += pnl;
-        }
-
-        private bool IsDailyLossLimitExceeded()
-        {
-            return _dailyPnL <= _tradingOptions.MaxDailyLoss;
-        }
-        private async Task SendDailyReport()
-        {
-            var stats = _dailyStats;
-            if (stats.TotalTrades == 0 && stats.TotalPnL == 0) return; // нет активности
-
-            string message = $"📊 <b>Ежедневный отчёт ({stats.Date:yyyy-MM-dd})</b>\n" +
-                             $"💰 PnL: {( stats.TotalPnL >= 0 ? "+" : "" )}{stats.TotalPnL:F2} USDC\n" +
-                             $"📈 Сделок: {stats.TotalTrades} (✅{stats.WinningTrades} / ❌{stats.LosingTrades})\n" +
-                             $"🎯 Win Rate: {stats.WinRate:F1}%\n" +
-                             $"📉 Макс. просадка: {stats.MaxDrawdown:F2} USDC";
-            await _telegram.SendMessageAsync (message);
-            // Сброс статистики
-            _dailyStats = new DailyStatistics { Date = DateTime.UtcNow.Date };
-        }
-
         private void StartTelegramBot()
         {
             if (_telegram.IsEnabled)
@@ -396,21 +435,64 @@ namespace BinancePulse.Services
 
         private async Task OnTelegramCommand(string command, string chatId)
         {
-            if (command == "/report")
+            switch (command)
             {
-                var stats = _dailyStats;
-                string report = $"📊 <b>Статистика за сегодня ({stats.Date:yyyy-MM-dd})</b>\n" +
-                                $"💰 PnL: {( stats.TotalPnL >= 0 ? "+" : "" )}{stats.TotalPnL:F2} USDC\n" +
-                                $"📈 Сделок: {stats.TotalTrades} (✅{stats.WinningTrades} / ❌{stats.LosingTrades})\n" +
-                                $"🎯 Win Rate: {stats.WinRate:F1}%\n" +
-                                $"📉 Макс. просадка: {stats.MaxDrawdown:F2} USDC";
-                await _telegram.SendMessageAsync (report);  // отправляем в тот же чат, откуда пришла команда
+                case "/balance":
+                    var bal = await _client.GetAccountBalanceAsync ("USDC");
+                    await _telegram.SendMessageAsync ($"💰 Баланс USDC: {bal:F2}");
+                    break;
+                case "/positions":
+                    var positions = GetPositionsWithCurrentPrice ();
+                    if (positions.Count == 0)
+                        await _telegram.SendMessageAsync ("📭 Нет открытых позиций.");
+                    else
+                    {
+                        string msg = "📋 <b>Открытые позиции:</b>\n";
+                        foreach (var p in positions)
+                        {
+                            msg += $"{p.Symbol}: {p.Quantity:F6} по {p.EntryPrice:F4}, PnL {p.PnLDisplay}\n";
+                        }
+                        await _telegram.SendMessageAsync (msg);
+                    }
+                    break;
+                case "/stop":
+                    PauseTrading ();
+                    await _telegram.SendMessageAsync ("⏸ Торговля приостановлена.");
+                    break;
+                case "/resume":
+                    ResumeTrading ();
+                    await _telegram.SendMessageAsync ("▶️ Торговля возобновлена.");
+                    break;
+                case "/settings":
+                    string settings = $"📊 <b>Текущие параметры:</b>\n" +
+                                      $"SMA: {_tradingOptions.FastSmaPeriod}/{_tradingOptions.SlowSmaPeriod}\n" +
+                                      $"RSI пороги: {_tradingOptions.RsiBuyThreshold}/{_tradingOptions.RsiSellThreshold}\n" +
+                                      $"SL/TP: {_tradingOptions.StopLossPercent:P0}/{_tradingOptions.TakeProfitPercent:P0}\n" +
+                                      $"Риск: {_tradingOptions.RiskPerTradePercent:P0}\n" +
+                                      $"Макс. позиций: {_tradingOptions.MaxConcurrentPositions}";
+                    await _telegram.SendMessageAsync (settings);
+                    break;
+                case "/report":
+                    await SendManualReport ();
+                    break;
+                default:
+                    await _telegram.SendMessageAsync ("❓ Неизвестная команда. Доступно: /balance, /positions, /stop, /resume, /settings, /report");
+                    break;
             }
         }
 
-        public async Task SendManualReport()
+        private async Task SendDailyReport()
         {
-            await SendDailyReport (); // тот же метод, что и для автоматического
+            var stats = _dailyStats;
+            if (stats.TotalTrades == 0 && stats.TotalPnL == 0) return;
+
+            string message = $"📊 <b>Ежедневный отчёт ({stats.Date:yyyy-MM-dd})</b>\n" +
+                             $"💰 PnL: {( stats.TotalPnL >= 0 ? "+" : "" )}{stats.TotalPnL:F2} USDC\n" +
+                             $"📈 Сделок: {stats.TotalTrades} (✅{stats.WinningTrades} / ❌{stats.LosingTrades})\n" +
+                             $"🎯 Win Rate: {stats.WinRate:F1}%\n" +
+                             $"📉 Макс. просадка: {stats.MaxDrawdown:F2} USDC";
+            await _telegram.SendMessageAsync (message);
+            _dailyStats = new DailyStatistics { Date = DateTime.UtcNow.Date };
         }
 
         private void Log(string msg) => OnLogGenerated?.Invoke (msg);

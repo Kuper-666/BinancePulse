@@ -12,6 +12,11 @@ namespace BinancePulse.Services
         private readonly string _filePath;
         private Dictionary<string, OpenPosition> _positions = new ();
 
+        // События для UI
+        public event Action<OpenPosition> PositionAdded;
+        public event Action<OpenPosition> PositionUpdated;
+        public event Action<string> PositionRemoved; // symbol
+
         public PositionManager()
         {
             string dir = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "Data");
@@ -43,9 +48,6 @@ namespace BinancePulse.Services
             catch { }
         }
 
-        /// <summary>
-        /// Загружает позиции из файла и обновляет StopLoss/TakeProfit по текущей цене
-        /// </summary>
         public async Task LoadAndUpdateAsync(Func<string, Task<decimal>> getPrice, Func<decimal, decimal> getStopLossPercent, Func<decimal, decimal> getTakeProfitPercent)
         {
             Load ();
@@ -65,9 +67,31 @@ namespace BinancePulse.Services
         }
 
         public bool TryGet(string symbol, out OpenPosition pos) => _positions.TryGetValue (symbol, out pos);
-        public void AddOrUpdate(string symbol, OpenPosition pos) { _positions[symbol] = pos; SaveAsync ().ConfigureAwait (false); }
-        public bool Remove(string symbol) { var removed = _positions.Remove (symbol); if (removed) SaveAsync ().ConfigureAwait (false); return removed; }
+
+        public void AddOrUpdate(string symbol, OpenPosition pos)
+        {
+            bool exists = _positions.ContainsKey (symbol);
+            _positions[symbol] = pos;
+            SaveAsync ().ConfigureAwait (false);
+            if (exists)
+                PositionUpdated?.Invoke (pos);
+            else
+                PositionAdded?.Invoke (pos);
+        }
+
+        public bool Remove(string symbol)
+        {
+            if (_positions.Remove (symbol))
+            {
+                SaveAsync ().ConfigureAwait (false);
+                PositionRemoved?.Invoke (symbol);
+                return true;
+            }
+            return false;
+        }
+
         public int Count => _positions.Count;
         public List<string> GetSymbols() => new List<string> (_positions.Keys);
+        public List<OpenPosition> GetAllPositions() => new List<OpenPosition> (_positions.Values);
     }
 }
