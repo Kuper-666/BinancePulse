@@ -55,8 +55,8 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
         body: Автоматически созданный релиз для версии ${{ github.ref_name }}.
-        files: BinancePulse_v${{ github.ref_name }}.zip
+        files: BinancePulse_${{ github.ref_name }}.zip
         draft: false
         prerelease: false
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_PULSE }}
