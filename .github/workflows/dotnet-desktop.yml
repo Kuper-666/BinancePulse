@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
     paths-ignore:
-      - 'BinancePulse/BinancePulse.csproj'   # Не запускать при изменении .csproj (коммит версии)
+      - 'BinancePulse/BinancePulse.csproj'
   workflow_dispatch:
 
 permissions:
@@ -16,8 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          # token не указываем – используется встроенный GITHUB_TOKEN
+          # (но он автоматически применяется для checkout)
 
       - name: Skip if version bump commit
         id: skip
@@ -56,9 +57,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Обновляем remote, чтобы использовать GITHUB_TOKEN
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git add BinancePulse/BinancePulse.csproj
           git commit -m "Bump version to ${{ steps.get_version.outputs.VERSION }}" || echo "No changes"
           git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Restore
         if: steps.skip.outputs.skip == 'false'
@@ -76,17 +81,26 @@ jobs:
         if: steps.skip.outputs.skip == 'false'
         run: Compress-Archive -Path .\publish\* -DestinationPath BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
 
-      # ===== НОВЫЙ ШАГ: Установка Inno Setup =====
       - name: Install Inno Setup
         if: steps.skip.outputs.skip == 'false'
         run: choco install innosetup -y
         shell: powershell
 
-      # ===== НОВЫЙ ШАГ: Сборка установщика =====
       - name: Build installer
         if: steps.skip.outputs.skip == 'false'
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
+          $issPath = ""
+          if (Test-Path "installer.iss") {
+            $issPath = "installer.iss"
+            } elseif (Test-Path "BinancePulse/installer.iss") {
+            $issPath = "BinancePulse/installer.iss"
+            } else {
+          Write-Host "❌ installer.iss not found!"
+          exit 1
+          }
+          Write-Host "✅ Using installer script: $issPath"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.get_version.outputs.VERSION }}" $issPath
+          shell: powershell
 
       - name: Create Release
         if: steps.skip.outputs.skip == 'false'
@@ -98,7 +112,5 @@ jobs:
             BinancePulse_v${{ steps.get_version.outputs.VERSION }}.zip
             Installers/BinancePulse_Setup.exe
           generate_release_notes: true
-          # Раскомментируйте следующую строку, если нужен предрелиз:
-          # prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
