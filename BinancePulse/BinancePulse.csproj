@@ -24,9 +24,11 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishReadyToRun>true</PublishReadyToRun>
+	<Nullable>disable</Nullable>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Services\RiskCalculatorTests.cs" />
+    <Compile Remove="Services\TradingStrategyTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="LICENSE.txt" />
