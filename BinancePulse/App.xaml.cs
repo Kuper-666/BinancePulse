@@ -80,7 +80,6 @@ namespace BinancePulse
                     services.AddSingleton<EarnService> ();
                     services.AddSingleton<BalanceRebalancerService> ();
                     services.AddSingleton<PositionManager> ();
-                    services.AddSingleton<TradingStrategy> ();
                     services.AddSingleton<BacktestEngine> ();
                     services.AddSingleton<BacktestViewModel> ();
 
